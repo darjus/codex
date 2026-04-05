@@ -2210,10 +2210,18 @@ impl App {
     ) -> Result<bool> {
         match op.view() {
             AppCommandView::Interrupt => {
-                let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await else {
+                if let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await {
+                    app_server.turn_interrupt(thread_id, turn_id).await?;
                     return Ok(true);
-                };
-                app_server.turn_interrupt(thread_id, turn_id).await?;
+                }
+
+                if let Some(server_name) = self.chat_widget.current_starting_mcp_server() {
+                    self.chat_widget
+                        .note_mcp_startup_skip_requested(server_name.clone());
+                    app_server
+                        .mcp_server_startup_interrupt(thread_id, server_name)
+                        .await?;
+                }
                 Ok(true)
             }
             AppCommandView::UserTurn {

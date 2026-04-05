@@ -1235,6 +1235,21 @@
       ],
       "type": "object"
     },
+    "McpServerStartupInterruptParams": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "threadId"
+      ],
+      "type": "object"
+    },
     "MergeStrategy": {
       "enum": [
         "replace",
@@ -4394,6 +4409,30 @@
         "method"
       ],
       "title": "Config/mcpServer/reloadRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "mcpServer/startup/interrupt"
+          ],
+          "title": "McpServer/startup/interruptRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/McpServerStartupInterruptParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "McpServer/startup/interruptRequest",
       "type": "object"
     },
     {

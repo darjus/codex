@@ -8,6 +8,8 @@ use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::JSONRPCResponse;
+use codex_app_server_protocol::McpServerStartupInterruptParams;
+use codex_app_server_protocol::McpServerStartupInterruptResponse;
 use codex_app_server_protocol::McpServerStartupState;
 use codex_app_server_protocol::McpServerStatusUpdatedNotification;
 use codex_app_server_protocol::RequestId;
@@ -505,6 +507,115 @@ async fn thread_start_emits_mcp_server_status_updated_notifications() -> Result<
 }
 
 #[tokio::test]
+async fn mcp_server_startup_interrupt_cancels_the_requested_server() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+
+    let codex_home = TempDir::new()?;
+    create_config_toml_with_optional_slow_mcp(codex_home.path(), &server.uri())?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let req_id = mcp
+        .send_thread_start_request(ThreadStartParams::default())
+        .await?;
+
+    let response: ThreadStartResponse = to_response(
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_response_message(RequestId::Integer(req_id)),
+        )
+        .await??,
+    )?;
+
+    let starting = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_matching_notification(
+            "mcpServer/startupStatus/updated starting optional_slow",
+            |notification| {
+                notification.method == "mcpServer/startupStatus/updated"
+                    && notification
+                        .params
+                        .as_ref()
+                        .and_then(|params| params.get("name"))
+                        .and_then(Value::as_str)
+                        == Some("optional_slow")
+                    && notification
+                        .params
+                        .as_ref()
+                        .and_then(|params| params.get("status"))
+                        .and_then(Value::as_str)
+                        == Some("starting")
+            },
+        ),
+    )
+    .await??;
+    let starting: ServerNotification = starting.try_into()?;
+    let ServerNotification::McpServerStatusUpdated(starting) = starting else {
+        anyhow::bail!("unexpected notification variant");
+    };
+    assert_eq!(
+        starting,
+        McpServerStatusUpdatedNotification {
+            name: "optional_slow".to_string(),
+            status: McpServerStartupState::Starting,
+            error: None,
+        }
+    );
+
+    let interrupt_req_id = mcp
+        .send_mcp_server_startup_interrupt_request(McpServerStartupInterruptParams {
+            thread_id: response.thread.id.clone(),
+            name: "optional_slow".to_string(),
+        })
+        .await?;
+    let _: McpServerStartupInterruptResponse = to_response(
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_response_message(RequestId::Integer(interrupt_req_id)),
+        )
+        .await??,
+    )?;
+
+    let cancelled = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_matching_notification(
+            "mcpServer/startupStatus/updated cancelled optional_slow",
+            |notification| {
+                notification.method == "mcpServer/startupStatus/updated"
+                    && notification
+                        .params
+                        .as_ref()
+                        .and_then(|params| params.get("name"))
+                        .and_then(Value::as_str)
+                        == Some("optional_slow")
+                    && notification
+                        .params
+                        .as_ref()
+                        .and_then(|params| params.get("status"))
+                        .and_then(Value::as_str)
+                        == Some("cancelled")
+            },
+        ),
+    )
+    .await??;
+    let cancelled: ServerNotification = cancelled.try_into()?;
+    let ServerNotification::McpServerStatusUpdated(cancelled) = cancelled else {
+        anyhow::bail!("unexpected notification variant");
+    };
+    assert_eq!(
+        cancelled,
+        McpServerStatusUpdatedNotification {
+            name: "optional_slow".to_string(),
+            status: McpServerStartupState::Cancelled,
+            error: None,
+        }
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn thread_start_surfaces_cloud_requirements_load_errors() -> Result<()> {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -901,6 +1012,36 @@ stream_max_retries = 0
     )
 }
 
+fn create_config_toml_with_optional_slow_mcp(
+    codex_home: &Path,
+    server_uri: &str,
+) -> std::io::Result<()> {
+    let config_toml = codex_home.join("config.toml");
+    std::fs::write(
+        config_toml,
+        format!(
+            r#"
+model = "mock-model"
+approval_policy = "never"
+sandbox_mode = "read-only"
+
+model_provider = "mock_provider"
+
+[model_providers.mock_provider]
+name = "Mock provider for test"
+base_url = "{server_uri}/v1"
+wire_api = "responses"
+request_max_retries = 0
+stream_max_retries = 0
+
+[mcp_servers.optional_slow]
+{optional_slow_transport}
+"#,
+            optional_slow_transport = slow_mcp_transport_toml()
+        ),
+    )
+}
+
 #[cfg(target_os = "windows")]
 fn broken_mcp_transport_toml() -> &'static str {
     r#"command = "cmd"
@@ -911,4 +1052,16 @@ args = ["/C", "exit 1"]"#
 fn broken_mcp_transport_toml() -> &'static str {
     r#"command = "/bin/sh"
 args = ["-c", "exit 1"]"#
+}
+
+#[cfg(target_os = "windows")]
+fn slow_mcp_transport_toml() -> &'static str {
+    r#"command = "powershell"
+args = ["-NoProfile", "-Command", "Start-Sleep -Seconds 30"]"#
+}
+
+#[cfg(not(target_os = "windows"))]
+fn slow_mcp_transport_toml() -> &'static str {
+    r#"command = "/bin/sh"
+args = ["-c", "sleep 30"]"#
 }

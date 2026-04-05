@@ -812,6 +812,8 @@ pub(crate) struct ChatWidget {
     mcp_startup_pending_next_round: HashMap<String, McpStartupStatus>,
     /// Tracks whether the buffered next round has seen any `Starting` update yet.
     mcp_startup_pending_next_round_saw_starting: bool,
+    /// MCP servers explicitly skipped by the user during the current startup round.
+    mcp_startup_user_skipped_servers: HashSet<String>,
     connectors_cache: ConnectorsCacheState,
     connectors_partial_snapshot: Option<ConnectorsSnapshot>,
     connectors_prefetch_in_flight: bool,
@@ -2925,16 +2927,55 @@ impl ChatWidget {
         self.mcp_startup_expected_servers = Some(server_names.into_iter().collect());
     }
 
+    pub(crate) fn current_starting_mcp_server(&self) -> Option<String> {
+        let current = self.mcp_startup_status.as_ref()?;
+        let mut starting: Vec<String> = current
+            .iter()
+            .filter_map(|(name, state)| {
+                matches!(state, McpStartupStatus::Starting).then_some(name.clone())
+            })
+            .collect();
+        starting.sort();
+        starting.into_iter().next()
+    }
+
+    pub(crate) fn note_mcp_startup_skip_requested(&mut self, server_name: String) {
+        self.mcp_startup_user_skipped_servers.insert(server_name);
+    }
+
     #[cfg(test)]
     fn on_mcp_startup_update(&mut self, ev: McpStartupUpdateEvent) {
         self.update_mcp_startup_status(ev.server, ev.status, /*complete_when_settled*/ false);
     }
 
     fn finish_mcp_startup(&mut self, failed: Vec<String>, cancelled: Vec<String>) {
-        if !cancelled.is_empty() {
+        let mut user_skipped = cancelled
+            .iter()
+            .filter(|name| self.mcp_startup_user_skipped_servers.contains(*name))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut interrupted = cancelled
+            .into_iter()
+            .filter(|name| !self.mcp_startup_user_skipped_servers.contains(name))
+            .collect::<Vec<_>>();
+        user_skipped.sort();
+        interrupted.sort();
+
+        if !user_skipped.is_empty() {
+            let subject = if user_skipped.len() == 1 {
+                "MCP server"
+            } else {
+                "MCP servers"
+            };
+            self.on_warning(format!(
+                "Skipped {subject} for this session: {}. Reload MCP servers or restart Codex to try again.",
+                user_skipped.join(", ")
+            ));
+        }
+        if !interrupted.is_empty() {
             self.on_warning(format!(
                 "MCP startup interrupted. The following servers were not initialized: {}",
-                cancelled.join(", ")
+                interrupted.join(", ")
             ));
         }
         let mut parts = Vec::new();
@@ -2950,6 +2991,7 @@ impl ChatWidget {
         self.mcp_startup_allow_terminal_only_next_round = false;
         self.mcp_startup_pending_next_round.clear();
         self.mcp_startup_pending_next_round_saw_starting = false;
+        self.mcp_startup_user_skipped_servers.clear();
         self.update_task_running_state();
         self.maybe_send_next_queued_input();
         self.request_redraw();
@@ -4655,6 +4697,7 @@ impl ChatWidget {
             mcp_startup_allow_terminal_only_next_round: false,
             mcp_startup_pending_next_round: HashMap::new(),
             mcp_startup_pending_next_round_saw_starting: false,
+            mcp_startup_user_skipped_servers: HashSet::new(),
             connectors_cache: ConnectorsCacheState::default(),
             connectors_partial_snapshot: None,
             connectors_prefetch_in_flight: false,

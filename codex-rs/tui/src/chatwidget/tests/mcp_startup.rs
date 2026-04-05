@@ -145,6 +145,44 @@ async fn app_server_mcp_startup_failure_renders_warning_history() {
 }
 
 #[tokio::test]
+async fn app_server_mcp_startup_user_skip_renders_generic_warning_history() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.show_welcome_banner = false;
+    chat.set_mcp_startup_expected_servers(["alpha".to_string()]);
+
+    chat.handle_server_notification(
+        ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            name: "alpha".to_string(),
+            status: McpServerStartupState::Starting,
+            error: None,
+        }),
+        /*replay_kind*/ None,
+    );
+
+    assert!(drain_insert_history(&mut rx).is_empty());
+    chat.note_mcp_startup_skip_requested("alpha".to_string());
+
+    chat.handle_server_notification(
+        ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            name: "alpha".to_string(),
+            status: McpServerStartupState::Cancelled,
+            error: None,
+        }),
+        /*replay_kind*/ None,
+    );
+
+    let summary_text = drain_insert_history(&mut rx)
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<String>();
+    assert_eq!(
+        summary_text,
+        "⚠ Skipped MCP server for this session: alpha. Reload MCP servers or restart\n  Codex to try again.\n"
+    );
+    assert!(!chat.bottom_pane.is_task_running());
+}
+
+#[tokio::test]
 async fn app_server_mcp_startup_lag_settles_startup_and_ignores_late_updates() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.show_welcome_banner = false;
