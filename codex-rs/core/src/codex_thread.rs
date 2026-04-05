@@ -93,6 +93,10 @@ impl CodexThread {
         self.codex.submit_with_trace(op, trace).await
     }
 
+    pub async fn cancel_mcp_server_startup(&self, server_name: &str) -> bool {
+        self.codex.cancel_mcp_server_startup(server_name).await
+    }
+
     pub async fn steer_input(
         &self,
         input: Vec<UserInput>,

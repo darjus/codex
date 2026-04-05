@@ -408,6 +408,7 @@ struct AsyncManagedClient {
     client: Shared<BoxFuture<'static, Result<ManagedClient, StartupOutcomeError>>>,
     startup_snapshot: Option<Vec<ToolInfo>>,
     startup_complete: Arc<AtomicBool>,
+    startup_cancel_token: CancellationToken,
     tool_plugin_provenance: Arc<ToolPluginProvenance>,
 }
 
@@ -434,15 +435,16 @@ impl AsyncManagedClient {
         let startup_tool_filter = tool_filter;
         let startup_complete = Arc::new(AtomicBool::new(false));
         let startup_complete_for_fut = Arc::clone(&startup_complete);
+        let startup_cancel_token = cancel_token.clone();
         let fut = async move {
-            let outcome = async {
+            let outcome = match async {
                 if let Err(error) = validate_mcp_server_name(&server_name) {
                     return Err(error.into());
                 }
 
                 let client =
                     Arc::new(make_rmcp_client(&server_name, config.transport, store_mode).await?);
-                match start_server_task(
+                start_server_task(
                     server_name,
                     client,
                     StartServerTaskParams {
@@ -456,14 +458,14 @@ impl AsyncManagedClient {
                         codex_apps_tools_cache_context,
                     },
                 )
-                .or_cancel(&cancel_token)
                 .await
-                {
-                    Ok(result) => result,
-                    Err(CancelErr::Cancelled) => Err(StartupOutcomeError::Cancelled),
-                }
             }
-            .await;
+            .or_cancel(&cancel_token)
+            .await
+            {
+                Ok(result) => result,
+                Err(CancelErr::Cancelled) => Err(StartupOutcomeError::Cancelled),
+            };
 
             startup_complete_for_fut.store(true, Ordering::Release);
             outcome
@@ -480,6 +482,7 @@ impl AsyncManagedClient {
             client,
             startup_snapshot,
             startup_complete,
+            startup_cancel_token,
             tool_plugin_provenance,
         }
     }
@@ -549,6 +552,7 @@ impl AsyncManagedClient {
         } else {
             match self.client().await {
                 Ok(client) => Some(client.listed_tools()),
+                Err(StartupOutcomeError::Cancelled) => None,
                 Err(_) => self.startup_snapshot.clone(),
             }
         };
@@ -558,6 +562,14 @@ impl AsyncManagedClient {
     async fn notify_sandbox_state_change(&self, sandbox_state: &SandboxState) -> Result<()> {
         let managed = self.client().await?;
         managed.notify_sandbox_state_change(sandbox_state).await
+    }
+
+    fn cancel_startup(&self) -> bool {
+        if self.startup_complete.load(Ordering::Acquire) {
+            return false;
+        }
+        self.startup_cancel_token.cancel();
+        true
     }
 }
 
@@ -683,9 +695,6 @@ impl McpConnectionManager {
             let sandbox_state = initial_sandbox_state.clone();
             join_set.spawn(async move {
                 let outcome = async_managed_client.client().await;
-                if cancel_token.is_cancelled() {
-                    return (server_name, Err(StartupOutcomeError::Cancelled));
-                }
                 let status = match &outcome {
                     Ok(_) => {
                         // Send sandbox state notification immediately after Ready
@@ -699,6 +708,7 @@ impl McpConnectionManager {
                         }
                         McpStartupStatus::Ready
                     }
+                    Err(StartupOutcomeError::Cancelled) => McpStartupStatus::Cancelled,
                     Err(error) => {
                         let error_str = mcp_init_error_display(
                             server_name.as_str(),
@@ -781,6 +791,12 @@ impl McpConnectionManager {
             Ok(Ok(_)) => true,
             Ok(Err(_)) | Err(_) => false,
         }
+    }
+
+    pub fn cancel_server_startup(&self, server_name: &str) -> bool {
+        self.clients
+            .get(server_name)
+            .is_some_and(AsyncManagedClient::cancel_startup)
     }
 
     pub async fn required_startup_failures(

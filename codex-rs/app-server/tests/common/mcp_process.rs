@@ -48,6 +48,7 @@ use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::ListMcpServerStatusParams;
 use codex_app_server_protocol::LoginAccountParams;
 use codex_app_server_protocol::McpResourceReadParams;
+use codex_app_server_protocol::McpServerStartupInterruptParams;
 use codex_app_server_protocol::MockExperimentalMethodParams;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::PluginInstallParams;
@@ -624,6 +625,16 @@ impl McpProcess {
     ) -> anyhow::Result<i64> {
         let params = Some(serde_json::to_value(params)?);
         self.send_request("turn/interrupt", params).await
+    }
+
+    /// Send a `mcpServer/startup/interrupt` JSON-RPC request (v2).
+    pub async fn send_mcp_server_startup_interrupt_request(
+        &mut self,
+        params: McpServerStartupInterruptParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("mcpServer/startup/interrupt", params)
+            .await
     }
 
     /// Send a `thread/realtime/start` JSON-RPC request (v2).

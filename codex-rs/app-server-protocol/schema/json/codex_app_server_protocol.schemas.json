@@ -1184,6 +1184,30 @@
             },
             "method": {
               "enum": [
+                "mcpServer/startup/interrupt"
+              ],
+              "title": "McpServer/startup/interruptRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/McpServerStartupInterruptParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "McpServer/startup/interruptRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "mcpServerStatus/list"
               ],
               "title": "McpServerStatus/listRequestMethod",
@@ -9069,6 +9093,28 @@
       "McpServerRefreshResponse": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "title": "McpServerRefreshResponse",
+        "type": "object"
+      },
+      "McpServerStartupInterruptParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "threadId"
+        ],
+        "title": "McpServerStartupInterruptParams",
+        "type": "object"
+      },
+      "McpServerStartupInterruptResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "McpServerStartupInterruptResponse",
         "type": "object"
       },
       "McpServerStartupState": {

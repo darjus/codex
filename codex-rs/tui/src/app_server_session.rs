@@ -14,6 +14,8 @@ use codex_app_server_protocol::GetAccountParams;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::GetAccountResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
+use codex_app_server_protocol::McpServerStartupInterruptParams;
+use codex_app_server_protocol::McpServerStartupInterruptResponse;
 use codex_app_server_protocol::Model as ApiModel;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
@@ -470,6 +472,26 @@ impl AppServerSession {
             })
             .await
             .wrap_err("turn/interrupt failed in TUI")?;
+        Ok(())
+    }
+
+    pub(crate) async fn mcp_server_startup_interrupt(
+        &mut self,
+        thread_id: ThreadId,
+        server_name: String,
+    ) -> Result<()> {
+        let request_id = self.next_request_id();
+        let _: McpServerStartupInterruptResponse = self
+            .client
+            .request_typed(ClientRequest::McpServerStartupInterrupt {
+                request_id,
+                params: McpServerStartupInterruptParams {
+                    thread_id: thread_id.to_string(),
+                    name: server_name,
+                },
+            })
+            .await
+            .wrap_err("mcpServer/startup/interrupt failed in TUI")?;
         Ok(())
     }
 

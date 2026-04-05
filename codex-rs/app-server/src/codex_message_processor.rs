@@ -82,6 +82,8 @@ use codex_app_server_protocol::McpServerOauthLoginCompletedNotification;
 use codex_app_server_protocol::McpServerOauthLoginParams;
 use codex_app_server_protocol::McpServerOauthLoginResponse;
 use codex_app_server_protocol::McpServerRefreshResponse;
+use codex_app_server_protocol::McpServerStartupInterruptParams;
+use codex_app_server_protocol::McpServerStartupInterruptResponse;
 use codex_app_server_protocol::McpServerStatus;
 use codex_app_server_protocol::McpServerStatusDetail;
 use codex_app_server_protocol::MockExperimentalMethodParams;
@@ -878,6 +880,10 @@ impl CodexMessageProcessor {
             }
             ClientRequest::McpServerRefresh { request_id, params } => {
                 self.mcp_server_refresh(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::McpServerStartupInterrupt { request_id, params } => {
+                self.mcp_server_startup_interrupt(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::McpServerStatusList { request_id, params } => {
@@ -4992,6 +4998,26 @@ impl CodexMessageProcessor {
         }
 
         let response = McpServerRefreshResponse {};
+        self.outgoing.send_response(request_id, response).await;
+    }
+
+    async fn mcp_server_startup_interrupt(
+        &self,
+        request_id: ConnectionRequestId,
+        params: McpServerStartupInterruptParams,
+    ) {
+        let McpServerStartupInterruptParams { thread_id, name } = params;
+        let (_, thread) = match self.load_thread(&thread_id).await {
+            Ok(v) => v,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        let _ = thread.cancel_mcp_server_startup(name.as_str()).await;
+
+        let response = McpServerStartupInterruptResponse {};
         self.outgoing.send_response(request_id, response).await;
     }
 

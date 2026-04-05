@@ -454,6 +454,11 @@ client_request_definitions! {
         response: v2::McpServerRefreshResponse,
     },
 
+    McpServerStartupInterrupt => "mcpServer/startup/interrupt" {
+        params: v2::McpServerStartupInterruptParams,
+        response: v2::McpServerStartupInterruptResponse,
+    },
+
     McpServerStatusList => "mcpServerStatus/list" {
         params: v2::ListMcpServerStatusParams,
         response: v2::ListMcpServerStatusResponse,

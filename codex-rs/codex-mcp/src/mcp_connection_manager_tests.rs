@@ -415,6 +415,7 @@ async fn list_all_tools_uses_startup_snapshot_while_client_is_pending() {
             client: pending_client,
             startup_snapshot: Some(startup_tools),
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            startup_cancel_token: CancellationToken::new(),
             tool_plugin_provenance: Arc::new(ToolPluginProvenance::default()),
         },
     );
@@ -440,6 +441,7 @@ async fn list_all_tools_blocks_while_client_is_pending_without_startup_snapshot(
             client: pending_client,
             startup_snapshot: None,
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            startup_cancel_token: CancellationToken::new(),
             tool_plugin_provenance: Arc::new(ToolPluginProvenance::default()),
         },
     );
@@ -462,6 +464,7 @@ async fn list_all_tools_does_not_block_when_startup_snapshot_cache_hit_is_empty(
             client: pending_client,
             startup_snapshot: Some(Vec::new()),
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            startup_cancel_token: CancellationToken::new(),
             tool_plugin_provenance: Arc::new(ToolPluginProvenance::default()),
         },
     );
@@ -494,6 +497,7 @@ async fn list_all_tools_uses_startup_snapshot_when_client_startup_fails() {
             client: failed_client,
             startup_snapshot: Some(startup_tools),
             startup_complete,
+            startup_cancel_token: CancellationToken::new(),
             tool_plugin_provenance: Arc::new(ToolPluginProvenance::default()),
         },
     );
@@ -504,6 +508,71 @@ async fn list_all_tools_uses_startup_snapshot_when_client_startup_fails() {
         .expect("tool from startup cache");
     assert_eq!(tool.server_name, CODEX_APPS_MCP_SERVER_NAME);
     assert_eq!(tool.tool_name, "calendar_create_event");
+}
+
+#[test]
+fn cancel_server_startup_only_cancels_the_requested_server() {
+    let approval_policy = Constrained::allow_any(AskForApproval::OnFailure);
+    let mut manager = McpConnectionManager::new_uninitialized(&approval_policy);
+    let alpha_cancel_token = CancellationToken::new();
+    let beta_cancel_token = CancellationToken::new();
+    let pending_client = futures::future::pending::<Result<ManagedClient, StartupOutcomeError>>()
+        .boxed()
+        .shared();
+
+    manager.clients.insert(
+        "alpha".to_string(),
+        AsyncManagedClient {
+            client: pending_client.clone(),
+            startup_snapshot: None,
+            startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            startup_cancel_token: alpha_cancel_token.clone(),
+            tool_plugin_provenance: Arc::new(ToolPluginProvenance::default()),
+        },
+    );
+    manager.clients.insert(
+        "beta".to_string(),
+        AsyncManagedClient {
+            client: pending_client,
+            startup_snapshot: None,
+            startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            startup_cancel_token: beta_cancel_token.clone(),
+            tool_plugin_provenance: Arc::new(ToolPluginProvenance::default()),
+        },
+    );
+
+    assert!(manager.cancel_server_startup("alpha"));
+    assert!(alpha_cancel_token.is_cancelled());
+    assert!(!beta_cancel_token.is_cancelled());
+    assert!(!manager.cancel_server_startup("missing"));
+}
+
+#[tokio::test]
+async fn list_all_tools_omits_cancelled_startup_snapshot() {
+    let startup_tools = vec![create_test_tool(
+        CODEX_APPS_MCP_SERVER_NAME,
+        "calendar_create_event",
+    )];
+    let cancelled_client = futures::future::ready::<Result<ManagedClient, StartupOutcomeError>>(
+        Err(StartupOutcomeError::Cancelled),
+    )
+    .boxed()
+    .shared();
+    let approval_policy = Constrained::allow_any(AskForApproval::OnFailure);
+    let mut manager = McpConnectionManager::new_uninitialized(&approval_policy);
+    manager.clients.insert(
+        CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        AsyncManagedClient {
+            client: cancelled_client,
+            startup_snapshot: Some(startup_tools),
+            startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            startup_cancel_token: CancellationToken::new(),
+            tool_plugin_provenance: Arc::new(ToolPluginProvenance::default()),
+        },
+    );
+
+    let tools = manager.list_all_tools().await;
+    assert!(tools.is_empty());
 }
 
 #[test]

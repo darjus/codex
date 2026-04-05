@@ -772,6 +772,10 @@ impl Codex {
         self.session.steer_input(input, expected_turn_id).await
     }
 
+    pub async fn cancel_mcp_server_startup(&self, server_name: &str) -> bool {
+        self.session.cancel_mcp_server_startup(server_name).await
+    }
+
     pub(crate) async fn set_app_server_client_info(
         &self,
         app_server_client_name: Option<String>,
@@ -4502,6 +4506,14 @@ impl Session {
             .lock()
             .await
             .cancel();
+    }
+
+    async fn cancel_mcp_server_startup(&self, server_name: &str) -> bool {
+        self.services
+            .mcp_connection_manager
+            .read()
+            .await
+            .cancel_server_startup(server_name)
     }
 }
 
